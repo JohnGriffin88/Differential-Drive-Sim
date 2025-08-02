@@ -43,6 +43,11 @@ public class DriveSubsystem extends SubsystemBase {
     StructPublisher<Pose2d> m_publisher;
 
     // TODO: Insert your drive motors and differential drive here...
+    private final SparkMax m_rightMotorFollower;
+    private final SparkMax m_rightMotorLeader;
+    private final SparkMax m_leftMotorFollower;
+    private final SparkMax m_leftMotorLeader;
+    private final DifferentialDrive m_drive;
 
     /** Creates a new DriveSubsystem. */
     public DriveSubsystem() {
@@ -62,11 +67,39 @@ public class DriveSubsystem extends SubsystemBase {
 
         // TODO: Instantiate motors & differential drive, then configure motors here...
 
+        m_leftLeader = new SparkMax(DriveConstants.kLeftLeaderMotorPort, MotorType.kBrushless);
+        m_leftFollower = new SparkMax(DriveConstants.kLeftFollowerMotorPort, MotorType.kBrushless);
+        m_rightLeader = new SparkMax(DriveConstants.kRightLeaderMotorPort, MotorType.kBrushless);
+        m_rightFollower = new SparkMax(DriveConstants.kRightFollowerMotorPort, MotorType.kBrushless);
+
+        SparkMaxConfig globalConfig = new SparkMaxConfig();
+        SparkMaxConfig leftLeaderConfig = new SparkMaxConfig();
+        SparkMaxConfig leftFollowerConfig = new SparkMaxConfig();
+        SparkMaxConfig rightLeaderConfig = new SparkMaxConfig();
+        SparkMaxConfig rightFollowerConfig = new SparkMaxConfig();
+
+        globalConfig.idleMode(IdleMode.kBrake).smartCurrentLimit(40);
+        leftLeaderConfig.apply(globalConfig);
+        leftFollowerConfig.apply(globalConfig).follow(m_leftLeader);
+        rightLeaderConfig.apply(globalConfig).inverted(true);
+        rightFollowerConfig.apply(globalConfig).follow(m_rightLeader);
+
+        m_leftLeader.configure(leftLeaderConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+        m_leftFollower.configure(leftFollowerConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+        m_rightLeader.configure(rightLeaderConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+        m_rightFollower.configure(rightFollowerConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+
+        m_drive = new DifferentialDrive(m_leftLeader, m_rightLeader);
+
         m_leftMotorSim = new SparkMaxSim(m_leftLeaderMotor, DCMotor.getNEO(2));
         m_rightMotorSim = new SparkMaxSim(m_rightLeaderMotor, DCMotor.getNEO(2));
     }
 
     // TODO: Insert your arcadeDrive method here...
+
+    public void arcadeDrive(double forward, double rotation) {
+        m_drive.arcadeDrive(forward, rotation);
+    }
 
     @Override
     public void periodic() {
