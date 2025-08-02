@@ -12,11 +12,16 @@ import frc.robot.subsystems.DriveSubsystem;
 public class ArcadeDriveCommand extends Command {
 
   // TODO: Insert your class variables here...
+  private final DriveSubsystem m_drive;
+  private final CommandXboxController m_controller;
 
   /** Creates a new ArcadeDriveCommand. */
   // TODO: Insert your consutrctor parameters
-  public ArcadeDriveCommand() {
+  public ArcadeDriveCommand(DriveSubsystem drive, CommandXboxController controller) {
     // TODO: Insert your constructor code here...
+      m_drive = drive;
+      m_controller = controller;
+      addRequirements(m_drive);
   }
 
   // Called when the command is initially scheduled.
@@ -28,6 +33,7 @@ public class ArcadeDriveCommand extends Command {
   @Override
   public void execute() {
     // TODO: Insert your command code here...
+    m_drive.arcadeDrive(m_controller.getLeftX(), m_controller.getLeftY());
   }
 
   // Called once the command ends or is interrupted.
