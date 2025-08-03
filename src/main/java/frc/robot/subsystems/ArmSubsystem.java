@@ -1,224 +1,177 @@
 package frc.robot.subsystems;
 
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
-import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj.simulation.SingleJointedArmSim;
 import edu.wpi.first.wpilibj.smartdashboard.Mechanism2d;
 import edu.wpi.first.wpilibj.smartdashboard.MechanismRoot2d;
 import edu.wpi.first.wpilibj.smartdashboard.MechanismLigament2d;
-import edu.wpi.first.math.controller.ArmFeedforward;
-import edu.wpi.first.math.util.Units;
-import edu.wpi.first.math.system.plant.DCMotor;
-import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 
 import com.ctre.phoenix6.hardware.TalonFX;
-import com.ctre.phoenix6.BaseStatusSignal;
-import com.ctre.phoenix6.StatusSignal;
-import com.ctre.phoenix6.controls.MotionMagicVoltage;
-import com.ctre.phoenix6.controls.PositionVoltage;
-import com.ctre.phoenix6.controls.VelocityVoltage;
-import com.ctre.phoenix6.signals.NeutralModeValue;
 import com.ctre.phoenix6.sim.TalonFXSimState;
+import com.ctre.phoenix6.controls.*;
+import com.ctre.phoenix6.signals.*;
 import com.ctre.phoenix6.configs.*;
+
+import edu.wpi.first.math.util.Units;
+import edu.wpi.first.math.controller.ArmFeedforward;
+import edu.wpi.first.math.system.plant.DCMotor;
+
 import frc.robot.Constants.ArmConstants;
 
-import edu.wpi.first.units.measure.*;
+import edu.wpi.first.units.*;
+
+import edu.wpi.first.wpilibj2.command.Command;
 
 public class ArmSubsystem extends SubsystemBase {
 
-  // Feedforward
-  private final ArmFeedforward feedforward = new ArmFeedforward(ArmConstants.kS,ArmConstants.kG,ArmConstants.kV,ArmConstants.kA);
+  // Core motor and sim setup
+  private final TalonFX armMotor = new TalonFX(ArmConstants.canID);
+  private final TalonFXSimState simMotorState = armMotor.getSimState();
 
-  // Motor control variables
-  private final TalonFX motor  = new TalonFX(ArmConstants.canID);
-  private final TalonFXSimState motorSim; 
-  private final PositionVoltage positionRequest;
-  private final VelocityVoltage velocityRequest;
-  private final StatusSignal<Angle> positionSignal;
-  private final StatusSignal<AngularVelocity> velocitySignal;
-  private final StatusSignal<Voltage> voltageSignal;
-  private final StatusSignal<Current> statorCurrentSignal;
-  private final StatusSignal<Temperature> temperatureSignal;
+  // Status signals
+  private final StatusSignal<Angle> angleStatus = armMotor.getPosition();
+  private final StatusSignal<AngularVelocity> speedStatus = armMotor.getVelocity();
+  private final StatusSignal<Voltage> voltageStatus = armMotor.getMotorVoltage();
+  private final StatusSignal<Current> currentStatus = armMotor.getStatorCurrent();
+  private final StatusSignal<Temperature> tempStatus = armMotor.getDeviceTemp();
 
-  // Simulation and visualization related variables
-  private final SingleJointedArmSim armSim;
-  private final Mechanism2d mech2d = new Mechanism2d(1.0, 1.0);
-  private final MechanismRoot2d root = mech2d.getRoot("ArmRoot", 0.5, 0.1);
-  private final MechanismLigament2d armLigament = root.append(new MechanismLigament2d("Arm", ArmConstants.armLength, 90));
-  private final MotionMagicVoltage armMotionMagicControl;
+  // Control modes
+  private final PositionVoltage positionCtrl = new PositionVoltage(0).withSlot(0);
+  private final VelocityVoltage velocityCtrl = new VelocityVoltage(0).withSlot(0);
+  private final MotionMagicVoltage motionCtrl = new MotionMagicVoltage(0);
 
-  // Constructor to initialize everything
+  // Feedforward model
+  private final ArmFeedforward armFF = new ArmFeedforward(ArmConstants.kS, ArmConstants.kG, ArmConstants.kV, ArmConstants.kA);
+
+  // Simulation
+  private final SingleJointedArmSim simArm = new SingleJointedArmSim(
+    DCMotor.getKrakenX60(1),
+    ArmConstants.gearRatio,
+    SingleJointedArmSim.estimateMOI(ArmConstants.armLength, 5),
+    ArmConstants.armLength,
+    Units.degreesToRadians(ArmConstants.minAngleDeg),
+    Units.degreesToRadians(ArmConstants.maxAngleDeg),
+    true,
+    Units.degreesToRadians(0)
+  );
+
+  // Visuals
+  private final Mechanism2d visual = new Mechanism2d(1.0, 1.0);
+  private final MechanismRoot2d root = visual.getRoot("Pivot", 0.5, 0.1);
+  private final MechanismLigament2d visualArm = root.append(new MechanismLigament2d("ArmBar", ArmConstants.armLength, 90));
+
   public ArmSubsystem() {
-    
-    motorSim = motor.getSimState(); //gets the simulation state of the motor
-    positionRequest = new PositionVoltage(0).withSlot(0);
-    velocityRequest = new VelocityVoltage(0).withSlot(0);
-    positionSignal = motor.getPosition();
-    velocitySignal = motor.getVelocity();
-    voltageSignal = motor.getMotorVoltage();
-    statorCurrentSignal = motor.getStatorCurrent();
-    temperatureSignal = motor.getDeviceTemp();
-
-    armMotionMagicControl = new MotionMagicVoltage(0);
-
-    // Configure motor parameters (PID, current limits, etc.)
+    // Configuration
     TalonFXConfiguration config = new TalonFXConfiguration();
-    Slot0Configs slot0 = config.Slot0;
-    slot0.kP = ArmConstants.kP;
-    slot0.kI = ArmConstants.kI;
-    slot0.kD = ArmConstants.kD;
 
-    CurrentLimitsConfigs currentLimits = config.CurrentLimits;
-    currentLimits.StatorCurrentLimit = ArmConstants.statorCurrentLimit;
-    currentLimits.StatorCurrentLimitEnable = ArmConstants.enableStatorLimit;
-    currentLimits.SupplyCurrentLimit = ArmConstants.supplyCurrentLimit;
-    currentLimits.SupplyCurrentLimitEnable = ArmConstants.enableSupplyLimit;
+    config.Slot0.kP = ArmConstants.kP;
+    config.Slot0.kI = ArmConstants.kI;
+    config.Slot0.kD = ArmConstants.kD;
+
+    config.CurrentLimits.StatorCurrentLimit = ArmConstants.statorCurrentLimit;
+    config.CurrentLimits.StatorCurrentLimitEnable = ArmConstants.enableStatorLimit;
+    config.CurrentLimits.SupplyCurrentLimit = ArmConstants.supplyCurrentLimit;
+    config.CurrentLimits.SupplyCurrentLimitEnable = ArmConstants.enableSupplyLimit;
 
     config.Feedback.SensorToMechanismRatio = ArmConstants.gearRatio;
+
     config.MotionMagic.MotionMagicCruiseVelocity = 10.0;
     config.MotionMagic.MotionMagicAcceleration = 20.0;
 
-    config.MotorOutput.NeutralMode = ArmConstants.brakeMode ? NeutralModeValue.Brake : NeutralModeValue.Coast; // Set brake mode
-    // config.Feedback.SensorToMechanismRatio = gearRatio; // Set gear ratio for the motor encoder
+    config.MotorOutput.NeutralMode = ArmConstants.brakeMode ? NeutralModeValue.Brake : NeutralModeValue.Coast;
 
-    motor.getConfigurator().apply(config);
-    // Initialize motor position to 0
-    motor.setPosition(0);
-    
-    // Initialize the arm simulation
-    armSim = new SingleJointedArmSim(
-      DCMotor.getKrakenX60(1),
-      ArmConstants.gearRatio,
-      SingleJointedArmSim.estimateMOI(ArmConstants.armLength, 5),
-      ArmConstants.armLength,
-      Units.degreesToRadians(ArmConstants.minAngleDeg),
-      Units.degreesToRadians(ArmConstants.maxAngleDeg),
-      true,
-      Units.degreesToRadians(0)
-    );
+    armMotor.getConfigurator().apply(config);
+    armMotor.setPosition(0);
 
-    armLigament.setLength(ArmConstants.armLength);
-
-    SmartDashboard.putData("Arm Visualization", mech2d);
+    SmartDashboard.putData("Arm Visual", visual);
   }
-  // This method is called periodically to update any information on the SmartDashboard
+
   @Override
   public void periodic() {
-  
-    BaseStatusSignal.refreshAll(positionSignal, velocitySignal, voltageSignal, statorCurrentSignal, temperatureSignal);
-    SmartDashboard.putNumber("Arm/Position (rot)", motor.getPosition().getValueAsDouble());
+    BaseStatusSignal.refreshAll(angleStatus, speedStatus, voltageStatus, currentStatus, tempStatus);
 
-    //SmartDashboard.putNumber("Arm/Position (rot)", getPosition());
-    SmartDashboard.putNumber("Arm/Velocity (rps)", getVelocity());
+    SmartDashboard.putNumber("Arm/Position", getPosition());
+    SmartDashboard.putNumber("Arm/Velocity", getVelocity());
     SmartDashboard.putNumber("Arm/Voltage", getVoltage());
     SmartDashboard.putNumber("Arm/Current", getCurrent());
     SmartDashboard.putNumber("Arm/Temperature", getTemperature());
   }
 
-  // This method is called periodically for simulation
   @Override
   public void simulationPeriodic() {
+    simMotorState.setSupplyVoltage(12);
 
-    SmartDashboard.putNumber("Sim/TargetRotations", armMotionMagicControl.Position);
-    SmartDashboard.putNumber("Sim/SimAngleDeg", Units.radiansToDegrees(armSim.getAngleRads()));
-    SmartDashboard.putNumber("Sim/MotorVoltage", motorSim.getMotorVoltage());
+    simArm.setInput(simMotorState.getMotorVoltage());
+    simArm.update(0.02);
 
-    motorSim.setSupplyVoltage(12);
+    simMotorState.setRawRotorPosition(
+      (simArm.getAngleRads() - Math.toRadians(ArmConstants.minAngleDeg)) *
+      ArmConstants.gearRatio / (2.0 * Math.PI)
+    );
+    simMotorState.setRotorVelocity(
+      simArm.getVelocityRadPerSec() * ArmConstants.gearRatio / (2.0 * Math.PI)
+    );
 
-    armSim.setInput(motorSim.getMotorVoltage());
-    armSim.update(0.02);
-
-    motorSim.setRawRotorPosition(
-        (armSim.getAngleRads() - Math.toRadians(ArmConstants.minAngleDeg))
-            * ArmConstants.gearRatio
-            / (2.0
-            * Math.PI));
-
-    motorSim.setRotorVelocity(
-      armSim.getVelocityRadPerSec() * ArmConstants.gearRatio / (2.0 * Math.PI));
-
-    armLigament.setAngle(Units.radiansToDegrees(armSim.getAngleRads()));
+    visualArm.setAngle(Units.radiansToDegrees(simArm.getAngleRads()));
+    SmartDashboard.putNumber("Sim/AngleDeg", Units.radiansToDegrees(simArm.getAngleRads()));
   }
-  
-  // Method to get current position of the arm (in rotations)
+
   public double getPosition() {
-    return positionSignal.getValueAsDouble();
+    return angleStatus.getValueAsDouble();
   }
 
-
-  // Method to get current velocity of the arm (in rotations per second)
   public double getVelocity() {
-    return velocitySignal.getValueAsDouble();
+    return speedStatus.getValueAsDouble();
   }
 
-  // Method to get current voltage applied to the motor
   public double getVoltage() {
-    return voltageSignal.getValueAsDouble();
+    return voltageStatus.getValueAsDouble();
   }
 
-  // Method to get current motor current
   public double getCurrent() {
-    return statorCurrentSignal.getValueAsDouble();
+    return currentStatus.getValueAsDouble();
   }
 
-  // Method to get current motor temperature
   public double getTemperature() {
-    return temperatureSignal.getValueAsDouble();
+    return tempStatus.getValueAsDouble();
   }
 
-   // Method to convert position to radians (for more precision in calculation)
-  public double getPositionRadians() {
-    return getPosition() * 2.0 * Math.PI;
+  public void moveToAngle(double targetAngleDeg) {
+    double targetRot = Math.toRadians(targetAngleDeg) / (2.0 * Math.PI);
+    motionCtrl.Position = targetRot;
+    armMotor.setControl(motionCtrl);
   }
 
-  // Method to set the arm position (in degrees)
-  public void setPosition(double position) {
-    double rotations = Math.toRadians(position) / (2.0 * Math.PI);
-    armMotionMagicControl.Slot = 0;
-    armMotionMagicControl.Position = rotations;
-    motor.setControl(armMotionMagicControl);
-  }
+  public void runAtVelocity(double degPerSec, double accel) {
+    double currentDeg = Units.radiansToDegrees(getPosition() * 2.0 * Math.PI);
 
-  // Method to set the arm velocity (in degrees per second)
-  public void setVelocity(double velocityDegPerSec) {
-    setVelocity(velocityDegPerSec, 0);
-  }
-
-   // Method to set the arm velocity with specified acceleration (in degrees per second)
-  public void setVelocity(double velocityDegPerSec, double acceleration) {
-    double currentDeg = Units.radiansToDegrees(getPositionRadians());
-    if ((currentDeg >= ArmConstants.maxAngleDeg && velocityDegPerSec > 0) ||
-        (currentDeg <= ArmConstants.minAngleDeg && velocityDegPerSec < 0)) {
-      velocityDegPerSec = 0;
+    if ((currentDeg >= ArmConstants.maxAngleDeg && degPerSec > 0) ||
+        (currentDeg <= ArmConstants.minAngleDeg && degPerSec < 0)) {
+      degPerSec = 0;
     }
-    double velocityRadPerSec = Units.degreesToRadians(velocityDegPerSec);
-    double velocityRotations = velocityRadPerSec / (2.0 * Math.PI);
-    double ffVolts = feedforward.calculate(getVelocity(), acceleration);
-    motor.setControl(velocityRequest.withVelocity(velocityRotations).withFeedForward(ffVolts));
+
+    double rotPerSec = Units.degreesToRadians(degPerSec) / (2.0 * Math.PI);
+    double ff = armFF.calculate(getVelocity(), accel);
+
+    armMotor.setControl(velocityCtrl.withVelocity(rotPerSec).withFeedForward(ff));
   }
 
-  // Method to set the motor voltage directly
-  public void setVoltage(double voltage) {
-    motor.setVoltage(voltage);
+  public void setRawVoltage(double volts) {
+    armMotor.setVoltage(volts);
   }
 
-  // Command to set the arm angle to a specific value
-  /*
-   * 
-   * A lambda expression is a short block of code which takes in parameters and returns a value. Lambda expressions are similar to methods,
-   * but they do not need a name and they can be implemented right in the body of a method.
-   */
-  public Command setAngleCommand(double angleDegrees) {
-    return runOnce(() -> setPosition(angleDegrees));
+  // ---- Commands ---- //
+
+  public Command moveToAngleCommand(double degrees) {
+    return runOnce(() -> moveToAngle(degrees));
   }
 
-  // Command to stop the arm by setting velocity to 0
-  public Command stopCommand() {
-    return runOnce(() -> setVelocity(0));
+  public Command stopArmCommand() {
+    return runOnce(() -> runAtVelocity(0, 0));
   }
 
-  // Command to move the arm at a specific velocity
-  public Command moveAtVelocityCommand(double velocityDegPerSec) {
-    return run(() -> setVelocity(velocityDegPerSec));
+  public Command runVelocityCommand(double degreesPerSecond) {
+    return run(() -> runAtVelocity(degreesPerSecond, 0));
   }
 }
