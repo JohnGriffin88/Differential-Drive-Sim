@@ -35,6 +35,9 @@ public class RobotContainer {
   public RobotContainer() {
     // Configure the trigger bindings
     configureBindings();
+    SmartDashboard.putData("45 degrees",m_armSubsystem.setAngleCommand(45));
+    SmartDashboard.putData("90 degrees",m_armSubsystem.setAngleCommand(90));
+    SmartDashboard.putData("0",m_armSubsystem.stopCommand());
   }
 
   /**
@@ -55,6 +58,10 @@ public class RobotContainer {
     // TODO: Insert your default command here...
     private void configureBindings() {
       m_driveSubsystem.setDefaultCommand(new ArcadeDriveCommand(m_driveSubsystem, m_driverController));
+        m_driverController.a().onTrue(m_armSubsystem.setAngleCommand(0));
+        m_driverController.b().onTrue(m_armSubsystem.setAngleCommand(45));
+        m_driverController.x().onTrue(m_armSubsystem.setAngleCommand(90));
+        m_driverController.y().onTrue(m_armSubsystem.stopCommand());
   }
 
   /**
